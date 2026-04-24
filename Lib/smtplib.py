@@ -632,8 +632,10 @@ class SMTP:
                 data = authobject(challenge)
 
         It will be called to process the server's challenge response; the
-        challenge argument it is passed will be a bytes.  It should return
-        string that will be base64 encoded and sent to the server.
+        challenge argument it is passed will be a bytes.  It should return a
+        str that will be base64 encoded and sent to the server.  The encoding
+        is inferred from the server's capabilities: UTF-8 if the server
+        advertises SMTPUTF8 (RFC 6531), ASCII otherwise.
 
         Keyword arguments:
             - initial_response_ok: Allow sending the RFC 4954 initial-response
@@ -677,8 +679,7 @@ class SMTP:
             return None
         if not _have_cram_md5_support:
             raise SMTPException("CRAM-MD5 is not supported")
-        # CRAM-MD5 is defined for ASCII credentials only.
-        self.user.encode('ascii')
+        # RFC 2195 defines CRAM-MD5 for ASCII credentials only.
         password = self.password.encode('ascii')
         authcode = hmac.HMAC(password, challenge, 'md5')
         return f"{self.user} {authcode.hexdigest()}"
@@ -686,6 +687,9 @@ class SMTP:
     def auth_plain(self, challenge=None):
         """ Authobject to use with PLAIN authentication. Requires self.user and
         self.password to be set."""
+        # RFC 4616 section 2 permits UTF-8 encoded credentials in SASL PLAIN.
+        # NUL is the field delimiter so it must not appear literally; escape it
+        # as %x00 so the server can recover the original value.
         return "\0%s\0%s" % (
             self.user.replace('\0', '%x00'),
             self.password.replace('\0', '%x00'),
@@ -694,9 +698,6 @@ class SMTP:
     def auth_login(self, challenge=None):
         """ Authobject to use with LOGIN authentication. Requires self.user and
         self.password to be set."""
-        # LOGIN was designed for ASCII credentials only.
-        self.user.encode('ascii')
-        self.password.encode('ascii')
         if challenge is None or self._auth_challenge_count < 2:
             return self.user
         else:

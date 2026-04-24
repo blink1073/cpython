@@ -1653,7 +1653,6 @@ class SimSMTPUnicodeChannel(SimSMTPChannel):
             self._authenticated(self._auth_login_user, True)
             del self._auth_login_user
 
-
 class SimSMTPUnicodeServer(SimSMTPServer):
     channel_class = SimSMTPUnicodeChannel
 
@@ -1730,18 +1729,26 @@ class TestAuthUnicode(unittest.TestCase):
         self.assertEqual(saslprep(chan.received_password),
                          saslprep(_sim_auth_unicode_pass))
 
-    def test_auth_login_unicode_raises(self):
-        """LOGIN: non-ASCII credentials raise UnicodeEncodeError because LOGIN
-        is defined for ASCII only."""
+    def test_auth_login_unicode_saslprep(self):
+        """LOGIN: with SMTPUTF8 advertised, non-ASCII credentials with NFC≠NFKC
+        codepoints survive the UTF-8/base64 round-trip and compare equal after
+        saslprep normalisation."""
+        self.serv.add_feature('SMTPUTF8')
         self.serv.add_feature('AUTH LOGIN')
         smtp = self._make_smtp()
-        with self.assertRaises(UnicodeEncodeError):
-            smtp.login(_sim_auth_unicode_user, _sim_auth_unicode_pass)
+        resp = smtp.login(_sim_auth_unicode_user, _sim_auth_unicode_pass)
+        self.assertEqual(resp, (235, b'Authentication Succeeded'))
         smtp.close()
+        chan = self.serv._SMTPchannel
+        self.assertEqual(saslprep(chan.received_user),
+                         saslprep(_sim_auth_unicode_user))
+        self.assertEqual(saslprep(chan.received_password),
+                         saslprep(_sim_auth_unicode_pass))
 
     def test_auth_cram_md5_unicode_raises(self):
-        """CRAM-MD5: non-ASCII credentials raise UnicodeEncodeError because
-        CRAM-MD5 is defined for ASCII only."""
+        """CRAM-MD5: non-ASCII credentials raise UnicodeEncodeError; RFC 2195
+        defines the mechanism for ASCII credentials only."""
+        self.serv.add_feature('SMTPUTF8')
         self.serv.add_feature('AUTH CRAM-MD5')
         smtp = self._make_smtp()
         with self.assertRaises(UnicodeEncodeError):

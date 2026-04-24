@@ -1,11 +1,10 @@
-:mod:`smtplib`: :meth:`~smtplib.SMTP.auth_plain` now accepts Unicode
-usernames and passwords when the server advertises the ``SMTPUTF8``
-extension (:rfc:`6531`): credentials are encoded as UTF-8, and any embedded
-NUL characters (``\x00``) are escaped as ``%x00`` to preserve the SASL
-PLAIN field framing. :meth:`~smtplib.SMTP.auth` now selects UTF-8 encoding
-automatically when ``SMTPUTF8`` is advertised, falling back to ASCII
-otherwise. :meth:`~smtplib.SMTP.auth_login` and
-:meth:`~smtplib.SMTP.auth_cram_md5` raise :exc:`UnicodeEncodeError` for
-non-ASCII credentials, as those mechanisms are defined for ASCII only.
-Unicode credential handling for SASL PLAIN is also tested in :mod:`imaplib`
+:mod:`smtplib`: when the server advertises the ``SMTPUTF8`` extension
+(:rfc:`6531`), :meth:`~smtplib.SMTP.auth` now encodes authentication
+responses as UTF-8, enabling Unicode usernames and passwords for
+``AUTH PLAIN`` (:rfc:`4616`) and ``AUTH LOGIN``.  ``AUTH PLAIN``
+additionally escapes embedded ``NUL`` characters (``\x00``) as ``%x00``
+to preserve SASL PLAIN field framing.  ``AUTH CRAM-MD5`` requires ASCII
+credentials per :rfc:`2195`; non-ASCII credentials raise
+:exc:`UnicodeEncodeError`.  Without ``SMTPUTF8``, all mechanisms use ASCII
+encoding.  Unicode credential handling is also tested in :mod:`imaplib`
 (via ``ENABLE UTF8=ACCEPT``) and :mod:`ftplib`.
