@@ -633,7 +633,7 @@ class SMTP:
 
         It will be called to process the server's challenge response; the
         challenge argument it is passed will be a bytes.  It should return
-        an ASCII string that will be base64 encoded and sent to the server.
+        an ASCII or UTF-8 string that will be base64 encoded and sent to the server.
 
         Keyword arguments:
             - initial_response_ok: Allow sending the RFC 4954 initial-response
@@ -645,7 +645,7 @@ class SMTP:
         mechanism = mechanism.upper()
         initial_response = (authobject() if initial_response_ok else None)
         if initial_response is not None:
-            response = encode_base64(initial_response.encode('ascii'), eol='')
+            response = encode_base64(initial_response.encode('utf-8'), eol='')
             (code, resp) = self.docmd("AUTH", mechanism + " " + response)
             self._auth_challenge_count = 1
         else:
@@ -655,8 +655,7 @@ class SMTP:
         while code == 334:
             self._auth_challenge_count += 1
             challenge = base64.decodebytes(resp)
-            response = encode_base64(
-                authobject(challenge).encode('ascii'), eol='')
+            response = encode_base64(authobject(challenge).encode('utf-8'), eol='')
             (code, resp) = self.docmd(response)
             # If server keeps sending challenges, something is wrong.
             if self._auth_challenge_count > _MAXCHALLENGE:
@@ -676,6 +675,8 @@ class SMTP:
             return None
         if not _have_cram_md5_support:
             raise SMTPException("CRAM-MD5 is not supported")
+        # CRAM-MD5 is defined for ASCII credentials only.
+        self.user.encode('ascii')
         password = self.password.encode('ascii')
         authcode = hmac.HMAC(password, challenge, 'md5')
         return f"{self.user} {authcode.hexdigest()}"
@@ -683,11 +684,17 @@ class SMTP:
     def auth_plain(self, challenge=None):
         """ Authobject to use with PLAIN authentication. Requires self.user and
         self.password to be set."""
-        return "\0%s\0%s" % (self.user, self.password)
+        return "\0%s\0%s" % (
+            self.user.replace('\0', '%x00'),
+            self.password.replace('\0', '%x00'),
+        )
 
     def auth_login(self, challenge=None):
         """ Authobject to use with LOGIN authentication. Requires self.user and
         self.password to be set."""
+        # LOGIN was designed for ASCII credentials only.
+        self.user.encode('ascii')
+        self.password.encode('ascii')
         if challenge is None or self._auth_challenge_count < 2:
             return self.user
         else:

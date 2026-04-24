@@ -1,0 +1,9 @@
+:mod:`smtplib`: :meth:`~smtplib.SMTP.auth_plain` now accepts Unicode
+usernames and passwords by encoding them as UTF-8, and escapes any embedded
+NUL characters (``\x00``) as ``%x00`` to preserve the SASL PLAIN field
+framing. :meth:`~smtplib.SMTP.auth` now always encodes auth responses as
+UTF-8. :meth:`~smtplib.SMTP.auth_login` and
+:meth:`~smtplib.SMTP.auth_cram_md5` raise :exc:`UnicodeEncodeError` for
+non-ASCII credentials, as those mechanisms are defined for ASCII only.
+Unicode credential handling for SASL PLAIN is also tested in :mod:`imaplib`
+(via ``ENABLE UTF8=ACCEPT``) and :mod:`ftplib`.

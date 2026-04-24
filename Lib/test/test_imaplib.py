@@ -1133,5 +1133,112 @@ class TestModule(unittest.TestCase):
         self.assertEqual(cm.filename, __file__)
 
 
+from test.support.saslprep import saslprep
+
+
+class UTF8IMAPHandler(SimpleIMAPHandler):
+    """IMAP handler that advertises and accepts UTF8=ACCEPT (RFC 6855).
+
+    After the client sends ENABLE UTF8=ACCEPT, imaplib switches its internal
+    encoding to UTF-8, so LOGIN arguments arrive as UTF-8 bytes.  This handler
+    decodes command lines as UTF-8 (ASCII is valid UTF-8, so pre-ENABLE
+    commands are unaffected) and records the received credentials.
+    """
+
+    capabilities = 'ENABLE UTF8=ACCEPT'
+
+    def setup(self):
+        super().setup()
+        self.server.received_user = None
+        self.server.received_password = None
+
+    def handle(self):
+        self._send_textline('* OK IMAP4rev1')
+        while True:
+            line = b''
+            while True:
+                try:
+                    part = self.rfile.read(1)
+                    if part == b'':
+                        return
+                    line += part
+                except OSError:
+                    return
+                if line.endswith(b'\r\n'):
+                    break
+            if verbose:
+                print('GOT: %r' % line.strip())
+            if self.continuation:
+                try:
+                    self.continuation.send(line)
+                except StopIteration:
+                    self.continuation = None
+                continue
+            splitline = line.decode('utf-8').split()
+            tag = splitline[0]
+            cmd = splitline[1]
+            args = splitline[2:]
+            if hasattr(self, 'cmd_' + cmd):
+                continuation = getattr(self, 'cmd_' + cmd)(tag, args)
+                if continuation:
+                    self.continuation = continuation
+                    next(continuation)
+            else:
+                self._send_tagged(tag, 'BAD', cmd + ' unknown')
+
+    def cmd_ENABLE(self, tag, args):
+        self._send_textline('* ENABLED ' + ' '.join(args))
+        self._send_tagged(tag, 'OK', 'ENABLE completed')
+
+    def cmd_LOGIN(self, tag, args):
+        # args[0] is the UTF-8 decoded username; args[1] is the quoted password
+        user = args[0]
+        password = args[1].strip('"') if len(args) > 1 else ''
+        self.server.received_user = user
+        self.server.received_password = password
+        self._send_tagged(tag, 'OK', 'LOGIN completed')
+
+
+class TestLoginUnicode(NewIMAPTestsMixin, unittest.TestCase):
+    """Test that imaplib.login() correctly encodes Unicode credentials as UTF-8."""
+
+    imap_class = imaplib.IMAP4
+    server_class = socketserver.TCPServer
+
+    def test_login_unicode_saslprep(self):
+        """LOGIN: after ENABLE UTF8=ACCEPT, non-ASCII credentials with NFC≠NFKC
+        codepoints (U+00BD, U+00B4) survive the UTF-8 round-trip and compare
+        equal after saslprep normalisation.
+
+        ENABLE is an AUTH-state command (RFC 5161), so the client state is
+        temporarily set to AUTH to issue it before login, then restored.
+        """
+        client, server = self._setup(UTF8IMAPHandler)
+        # ½user / pass´  — codepoints where NFC != NFKC
+        unicode_user = '\xbduser'
+        unicode_pass = 'pass\xb4'
+        # ENABLE is only valid in AUTH state; set it temporarily so that
+        # imaplib's state check passes, then restore NONAUTH for login.
+        client.state = 'AUTH'
+        client.enable('UTF8=ACCEPT')
+        client.state = 'NONAUTH'
+        ret, _ = client.login(unicode_user, unicode_pass)
+        self.assertEqual(ret, 'OK')
+        self.assertEqual(saslprep(server.received_user), saslprep(unicode_user))
+        self.assertEqual(saslprep(server.received_password), saslprep(unicode_pass))
+
+    def test_login_nul_raises(self):
+        """LOGIN: NUL in username is rejected by the IMAP control-chars check."""
+        client, _ = self._setup(SimpleIMAPHandler)
+        with self.assertRaises(ValueError):
+            client.login('user\x00name', 'pass')
+
+    def test_login_nul_in_password_raises(self):
+        """LOGIN: NUL in password is rejected by the IMAP control-chars check."""
+        client, _ = self._setup(SimpleIMAPHandler)
+        with self.assertRaises(ValueError):
+            client.login('user', 'pass\x00word')
+
+
 if __name__ == "__main__":
     unittest.main()

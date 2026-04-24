@@ -1154,6 +1154,56 @@ class MiscTestCase(TestCase):
         support.check__all__(self, ftplib, not_exported=not_exported)
 
 
+from test.support.saslprep import saslprep
+
+
+class FTPUnicodeHandler(DummyFTPHandler):
+    """FTP handler that stores received USER and PASS arguments for inspection."""
+
+    received_user = None
+    received_password = None
+
+    def cmd_user(self, arg):
+        self.received_user = arg
+        super().cmd_user(arg)
+
+    def cmd_pass(self, arg):
+        self.received_password = arg
+        super().cmd_pass(arg)
+
+
+class FTPUnicodeServer(DummyFTPServer):
+    handler = FTPUnicodeHandler
+
+
+class TestFTPUnicode(TestCase):
+    """Test that ftplib.login() correctly transmits Unicode credentials as UTF-8."""
+
+    def setUp(self):
+        self.server = FTPUnicodeServer((HOST, 0))
+        self.server.start()
+        self.client = ftplib.FTP(timeout=TIMEOUT)
+        self.client.connect(self.server.host, self.server.port)
+
+    def tearDown(self):
+        self.client.close()
+        self.server.stop()
+        self.server = None
+        asyncore.close_all(ignore_all=True)
+
+    def test_login_unicode_saslprep(self):
+        """login(): non-ASCII credentials with NFC≠NFKC codepoints (U+00BD, U+00B4)
+        are transmitted as UTF-8 and compare equal after saslprep normalisation."""
+        # U+00BD ½ (VULGAR FRACTION ONE HALF) and U+00B4 ´ (ACUTE ACCENT):
+        # NFC and NFKC normalise these differently, exercising saslprep logic.
+        unicode_user = '\xbduser'
+        unicode_pass = 'pass\xb4'
+        self.client.login(unicode_user, unicode_pass)
+        handler = self.server.handler_instance
+        self.assertEqual(saslprep(handler.received_user), saslprep(unicode_user))
+        self.assertEqual(saslprep(handler.received_password), saslprep(unicode_pass))
+
+
 def setUpModule():
     thread_info = threading_helper.threading_setup()
     unittest.addModuleCleanup(threading_helper.threading_cleanup, *thread_info)

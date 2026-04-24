@@ -1607,5 +1607,196 @@ class SMTPAUTHInitialResponseSimTests(unittest.TestCase):
         self.assertEqual(code, 235)
 
 
+from test.support.saslprep import saslprep
+
+# Unicode credentials for auth tests.
+# U+00BD (½, VULGAR FRACTION ONE HALF) and U+00B4 (´, ACUTE ACCENT) are
+# codepoints whose Unicode Normalization Form C and Form KC differ,
+# making them good test cases for saslprep-aware servers.
+_sim_auth_unicode_user = '\xbduser'   # ½user
+_sim_auth_unicode_pass = 'pass\xb4'  # pass´
+
+
+class SimSMTPUnicodeChannel(SimSMTPChannel):
+    """SMTP channel that captures decoded credentials for test inspection."""
+
+    received_user = None
+    received_password = None
+
+    def _auth_plain(self, arg=None):
+        if arg is None:
+            self.push('334 ')
+            return
+        logpass = self._decode_base64(arg)
+        try:
+            *_, user, password = logpass.split('\0')
+        except ValueError as e:
+            self.push('535 Splitting response {!r} into user and password'
+                      ' failed: {}'.format(logpass, e))
+            return
+        self.received_user = user
+        self.received_password = password
+        self._authenticated(user, True)
+
+    def _auth_login(self, arg=None):
+        if arg is None:
+            # base64 encoded 'Username:'
+            self.push('334 VXNlcm5hbWU6')
+        elif not hasattr(self, '_auth_login_user'):
+            self._auth_login_user = self._decode_base64(arg)
+            # base64 encoded 'Password:'
+            self.push('334 UGFzc3dvcmQ6')
+        else:
+            password = self._decode_base64(arg)
+            self.received_user = self._auth_login_user
+            self.received_password = password
+            self._authenticated(self._auth_login_user, True)
+            del self._auth_login_user
+
+
+class SimSMTPUnicodeServer(SimSMTPServer):
+    channel_class = SimSMTPUnicodeChannel
+
+
+class SimSMTPAsciiOnlyChannel(SimSMTPChannel):
+    """SMTP channel that rejects non-ASCII credentials (simulates a server
+    that does not support UTF-8 in SASL PLAIN)."""
+
+    def _auth_plain(self, arg=None):
+        if arg is None:
+            self.push('334 ')
+            return
+        logpass = self._decode_base64(arg)
+        try:
+            *_, user, password = logpass.split('\0')
+        except ValueError as e:
+            self.push('535 Splitting response {!r} into user and password'
+                      ' failed: {}'.format(logpass, e))
+            return
+        if not user.isascii() or not password.isascii():
+            self.push('535 Authentication credentials invalid')
+            return
+        self._authenticated(user, password == sim_auth[1])
+
+
+class SimSMTPAsciiOnlyServer(SimSMTPServer):
+    channel_class = SimSMTPAsciiOnlyChannel
+
+
+class TestAuthUnicode(unittest.TestCase):
+    """Test that smtplib correctly encodes Unicode credentials as UTF-8."""
+
+    def setUp(self):
+        self.thread_key = threading_helper.threading_setup()
+        self.real_getfqdn = socket.getfqdn
+        socket.getfqdn = mock_socket.getfqdn
+        self.serv_evt = threading.Event()
+        self.client_evt = threading.Event()
+        self.serv = SimSMTPUnicodeServer(
+            (HOST, 0), ('nowhere', -1), decode_data=True)
+        self.port = self.serv.socket.getsockname()[1]
+        serv_args = (self.serv, self.serv_evt, self.client_evt)
+        self.thread = threading.Thread(target=debugging_server, args=serv_args)
+        self.thread.start()
+        self.serv_evt.wait()
+        self.serv_evt.clear()
+
+    def tearDown(self):
+        socket.getfqdn = self.real_getfqdn
+        self.client_evt.set()
+        self.serv_evt.wait()
+        threading_helper.join_thread(self.thread)
+        del self.thread
+        self.doCleanups()
+        threading_helper.threading_cleanup(*self.thread_key)
+
+    def _make_smtp(self):
+        return smtplib.SMTP(HOST, self.port, local_hostname='localhost',
+                            timeout=support.LOOPBACK_TIMEOUT)
+
+    def test_auth_plain_unicode_saslprep(self):
+        """PLAIN: non-ASCII credentials with NFC≠NFKC codepoints survive the
+        UTF-8/base64 round-trip and compare equal after saslprep normalisation."""
+        self.serv.add_feature('AUTH PLAIN')
+        smtp = self._make_smtp()
+        resp = smtp.login(_sim_auth_unicode_user, _sim_auth_unicode_pass)
+        self.assertEqual(resp, (235, b'Authentication Succeeded'))
+        smtp.close()
+        chan = self.serv._SMTPchannel
+        self.assertEqual(saslprep(chan.received_user),
+                         saslprep(_sim_auth_unicode_user))
+        self.assertEqual(saslprep(chan.received_password),
+                         saslprep(_sim_auth_unicode_pass))
+
+    def test_auth_login_unicode_raises(self):
+        """LOGIN: non-ASCII credentials raise UnicodeEncodeError because LOGIN
+        is defined for ASCII only."""
+        self.serv.add_feature('AUTH LOGIN')
+        smtp = self._make_smtp()
+        with self.assertRaises(UnicodeEncodeError):
+            smtp.login(_sim_auth_unicode_user, _sim_auth_unicode_pass)
+        smtp.close()
+
+    def test_auth_cram_md5_unicode_raises(self):
+        """CRAM-MD5: non-ASCII credentials raise UnicodeEncodeError because
+        CRAM-MD5 is defined for ASCII only."""
+        self.serv.add_feature('AUTH CRAM-MD5')
+        smtp = self._make_smtp()
+        with self.assertRaises(UnicodeEncodeError):
+            smtp.login(_sim_auth_unicode_user, _sim_auth_unicode_pass)
+        smtp.close()
+
+    def test_auth_plain_server_rejects_unicode(self):
+        """PLAIN: a server that does not accept non-ASCII credentials returns
+        535; the client raises SMTPAuthenticationError."""
+        ascii_only_serv = SimSMTPAsciiOnlyServer(
+            (HOST, 0), ('nowhere', -1), decode_data=True)
+        ascii_only_serv.add_feature('AUTH PLAIN')
+        port = ascii_only_serv.socket.getsockname()[1]
+        serv_evt = threading.Event()
+        client_evt = threading.Event()
+        t = threading.Thread(
+            target=debugging_server,
+            args=(ascii_only_serv, serv_evt, client_evt),
+        )
+        t.start()
+        serv_evt.wait()
+        serv_evt.clear()
+        try:
+            smtp = smtplib.SMTP(HOST, port, local_hostname='localhost',
+                                timeout=support.LOOPBACK_TIMEOUT)
+            with self.assertRaises(smtplib.SMTPAuthenticationError):
+                smtp.login(_sim_auth_unicode_user, _sim_auth_unicode_pass)
+            smtp.close()
+        finally:
+            client_evt.set()
+            serv_evt.wait()
+            threading_helper.join_thread(t)
+
+    def test_auth_plain_nul_escaped(self):
+        """PLAIN: NUL in username is escaped to %x00 so the \\0 delimiter is
+        preserved and the server can split the PLAIN response correctly."""
+        self.serv.add_feature('AUTH PLAIN')
+        smtp = self._make_smtp()
+        resp = smtp.login('user\x00name', 'pass')
+        self.assertEqual(resp, (235, b'Authentication Succeeded'))
+        smtp.close()
+        chan = self.serv._SMTPchannel
+        self.assertIn('%x00', chan.received_user)
+        self.assertNotIn('\x00', chan.received_user)
+
+    def test_auth_login_nul_roundtrip(self):
+        """LOGIN: NUL in username is base64-encoded without escaping because
+        LOGIN has no NUL delimiters; the NUL survives the round-trip intact."""
+        self.serv.add_feature('AUTH LOGIN')
+        smtp = self._make_smtp()
+        resp = smtp.login('user\x00name', 'pass')
+        self.assertEqual(resp, (235, b'Authentication Succeeded'))
+        smtp.close()
+        chan = self.serv._SMTPchannel
+        self.assertIn('\x00', chan.received_user)
+        self.assertNotIn('%x00', chan.received_user)
+
+
 if __name__ == '__main__':
     unittest.main()
