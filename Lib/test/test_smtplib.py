@@ -1716,7 +1716,9 @@ class TestAuthUnicode(unittest.TestCase):
 
     def test_auth_plain_unicode_saslprep(self):
         """PLAIN: non-ASCII credentials with NFC≠NFKC codepoints survive the
-        UTF-8/base64 round-trip and compare equal after saslprep normalisation."""
+        UTF-8/base64 round-trip and compare equal after saslprep normalisation.
+        The server must advertise SMTPUTF8 so that auth() uses UTF-8 encoding."""
+        self.serv.add_feature('SMTPUTF8')
         self.serv.add_feature('AUTH PLAIN')
         smtp = self._make_smtp()
         resp = smtp.login(_sim_auth_unicode_user, _sim_auth_unicode_pass)
@@ -1751,6 +1753,7 @@ class TestAuthUnicode(unittest.TestCase):
         535; the client raises SMTPAuthenticationError."""
         ascii_only_serv = SimSMTPAsciiOnlyServer(
             (HOST, 0), ('nowhere', -1), decode_data=True)
+        ascii_only_serv.add_feature('SMTPUTF8')
         ascii_only_serv.add_feature('AUTH PLAIN')
         port = ascii_only_serv.socket.getsockname()[1]
         serv_evt = threading.Event()

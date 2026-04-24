@@ -1227,6 +1227,15 @@ class TestLoginUnicode(NewIMAPTestsMixin, unittest.TestCase):
         self.assertEqual(saslprep(server.received_user), saslprep(unicode_user))
         self.assertEqual(saslprep(server.received_password), saslprep(unicode_pass))
 
+    def test_login_unicode_without_enable_raises(self):
+        """LOGIN: non-ASCII credentials raise UnicodeEncodeError when
+        UTF8=ACCEPT has not been enabled; the default encoding is ASCII."""
+        client, _ = self._setup(UTF8IMAPHandler)
+        unicode_user = '\xbduser'
+        unicode_pass = 'pass\xb4'
+        with self.assertRaises(UnicodeEncodeError):
+            client.login(unicode_user, unicode_pass)
+
     def test_login_nul_raises(self):
         """LOGIN: NUL in username is rejected by the IMAP control-chars check."""
         client, _ = self._setup(SimpleIMAPHandler)

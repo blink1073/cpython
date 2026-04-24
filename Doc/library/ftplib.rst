@@ -215,6 +215,9 @@ FTP objects
       :param str acct:
          |param_doc_acct|
 
+      Unicode usernames and passwords are supported.  Credentials are sent
+      encoded as UTF-8 by default (following :rfc:`2640`).
+
 
    .. method:: FTP.abort()
 

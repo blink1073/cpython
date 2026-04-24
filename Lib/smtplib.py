@@ -633,7 +633,7 @@ class SMTP:
 
         It will be called to process the server's challenge response; the
         challenge argument it is passed will be a bytes.  It should return
-        an ASCII or UTF-8 string that will be base64 encoded and sent to the server.
+        string that will be base64 encoded and sent to the server.
 
         Keyword arguments:
             - initial_response_ok: Allow sending the RFC 4954 initial-response
@@ -643,9 +643,10 @@ class SMTP:
         # methods support it.  By definition, if they return something other
         # than None when challenge is None, then they do.  See issue #15014.
         mechanism = mechanism.upper()
+        encoding = 'ascii' if not self.has_extn('smtputf8') else 'utf-8'
         initial_response = (authobject() if initial_response_ok else None)
         if initial_response is not None:
-            response = encode_base64(initial_response.encode('utf-8'), eol='')
+            response = encode_base64(initial_response.encode(encoding), eol='')
             (code, resp) = self.docmd("AUTH", mechanism + " " + response)
             self._auth_challenge_count = 1
         else:
@@ -655,7 +656,8 @@ class SMTP:
         while code == 334:
             self._auth_challenge_count += 1
             challenge = base64.decodebytes(resp)
-            response = encode_base64(authobject(challenge).encode('utf-8'), eol='')
+            response = encode_base64(
+                authobject(challenge).encode(encoding), eol='')
             (code, resp) = self.docmd(response)
             # If server keeps sending challenges, something is wrong.
             if self._auth_challenge_count > _MAXCHALLENGE:

@@ -382,23 +382,37 @@ An :class:`SMTP` instance has the following methods:
 
    If optional keyword argument *initial_response_ok* is true,
    ``authobject()`` will be called first with no argument.  It can return the
-   :rfc:`4954` "initial response" ASCII ``str`` which will be encoded and sent with
-   the ``AUTH`` command as below.  If the ``authobject()`` does not support an
-   initial response (e.g. because it requires a challenge), it should return
-   ``None`` when called with ``challenge=None``.  If *initial_response_ok* is
-   false, then ``authobject()`` will not be called first with ``None``.
+   :rfc:`4954` "initial response" ``str`` which will be base64 encoded (as
+   UTF-8) and sent with the ``AUTH`` command as below.  If the
+   ``authobject()`` does not support an initial response (e.g. because it
+   requires a challenge), it should return ``None`` when called with
+   ``challenge=None``.  If *initial_response_ok* is false, then
+   ``authobject()`` will not be called first with ``None``.
 
    If the initial response check returns ``None``, or if *initial_response_ok* is
    false, ``authobject()`` will be called to process the server's challenge
    response; the *challenge* argument it is passed will be a ``bytes``.  It
-   should return ASCII ``str`` *data* that will be base64 encoded and sent to the
-   server.
+   should return ``str`` *data* that will be base64 encoded (as UTF-8) and
+   sent to the server.
 
    The ``SMTP`` class provides ``authobjects`` for the ``CRAM-MD5``, ``PLAIN``,
    and ``LOGIN`` mechanisms; they are named ``SMTP.auth_cram_md5``,
    ``SMTP.auth_plain``, and ``SMTP.auth_login`` respectively.  They all require
    that the ``user`` and ``password`` properties of the ``SMTP`` instance are
    set to appropriate values.
+
+   The encoding used for base64 is ``'ascii'`` unless the server advertises
+   the ``SMTPUTF8`` extension (:rfc:`6531`), in which case ``'utf-8'`` is
+   used.
+
+   ``SMTP.auth_plain`` supports Unicode usernames and passwords when the
+   server advertises ``SMTPUTF8``: credentials are encoded as UTF-8, and
+   any embedded ``NUL`` character (``\x00``) is escaped as ``%x00`` to
+   preserve the ``SASL PLAIN`` field framing (``\x00authcid\x00passwd``).
+
+   ``SMTP.auth_login`` and ``SMTP.auth_cram_md5`` only support ASCII
+   usernames and passwords.  Providing non-ASCII credentials raises
+   :exc:`UnicodeEncodeError`.
 
    User code does not normally need to call ``auth`` directly, but can instead
    call the :meth:`login` method, which will try each of the above mechanisms
