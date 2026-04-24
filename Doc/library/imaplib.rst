@@ -398,11 +398,10 @@ An :class:`IMAP4` instance has the following methods:
 
    Identify the client using a plaintext password. The *password* will be quoted.
 
-   Unicode usernames and passwords are supported when the server has enabled
-   the ``UTF8=ACCEPT`` capability via :meth:`enable` (:rfc:`6855`).  Without
-   it, the credentials are encoded as ASCII and non-ASCII characters raise
-   :exc:`UnicodeEncodeError`.  Credentials containing ``NUL`` characters
-   (``\x00``) always raise :exc:`ValueError`.
+   Unicode usernames and passwords are supported if the ``UTF8=ACCEPT`` capability
+   was enabled using the :meth:`enable` command.  Otherwise, the credentials are
+   encoded as ASCII and non-ASCII characters raise :exc:`UnicodeEncodeError`.
+   Credentials containing ``NUL`` characters (``\x00``) always raise :exc:`ValueError`.
 
 
 .. method:: IMAP4.login_cram_md5(user, password)
