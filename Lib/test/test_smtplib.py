@@ -1607,7 +1607,7 @@ class SMTPAUTHInitialResponseSimTests(unittest.TestCase):
         self.assertEqual(code, 235)
 
 
-from test.support.saslprep import saslprep
+from test.support.saslprep import sasl_plain_equal, saslprep
 
 # Unicode credentials for auth tests.
 # U+00BD (½, VULGAR FRACTION ONE HALF) and U+00B4 (´, ACUTE ACCENT) are
@@ -1724,10 +1724,33 @@ class TestAuthUnicode(unittest.TestCase):
         self.assertEqual(resp, (235, b'Authentication Succeeded'))
         smtp.close()
         chan = self.serv._SMTPchannel
-        self.assertEqual(saslprep(chan.received_user),
-                         saslprep(_sim_auth_unicode_user))
-        self.assertEqual(saslprep(chan.received_password),
-                         saslprep(_sim_auth_unicode_pass))
+        self.assertTrue(sasl_plain_equal(chan.received_user, _sim_auth_unicode_user))
+        self.assertTrue(sasl_plain_equal(chan.received_password, _sim_auth_unicode_pass))
+
+    def test_auth_plain_unassigned_code_point(self):
+        """PLAIN: credentials containing a code point unassigned in Unicode 3.2
+        (U+0221, LATIN SMALL LETTER D WITH CURL) are transmitted correctly.
+        RFC 4616 §2 requires query mode (unassigned allowed) on the received
+        side; stored string mode rejects the same credential."""
+        self.serv.add_feature('SMTPUTF8')
+        self.serv.add_feature('AUTH PLAIN')
+        # U+0221 was unassigned in Unicode 3.2 (the version used by SASLprep /
+        # RFC 3454) but is assigned in Unicode 4.0+.
+        unassigned_user = 'user\u0221'
+        smtp = self._make_smtp()
+        resp = smtp.login(unassigned_user, 'pass')
+        self.assertEqual(resp, (235, b'Authentication Succeeded'))
+        smtp.close()
+        chan = self.serv._SMTPchannel
+        # RFC 4616 §2: the server SHOULD apply SASLprep in query mode
+        # (unassigned code points allowed) to the received credentials.
+        # The reference strings are stored strings (unassigned prohibited).
+        self.assertEqual(
+            saslprep(chan.received_user, prohibit_unassigned_code_points=False),
+            saslprep(unassigned_user, prohibit_unassigned_code_points=False))
+        # Confirm that stored string mode rejects the unassigned code point.
+        with self.assertRaises(ValueError):
+            saslprep(chan.received_user)
 
     def test_auth_login_unicode_saslprep(self):
         """LOGIN: with SMTPUTF8 advertised, non-ASCII credentials with NFC≠NFKC
@@ -1740,10 +1763,8 @@ class TestAuthUnicode(unittest.TestCase):
         self.assertEqual(resp, (235, b'Authentication Succeeded'))
         smtp.close()
         chan = self.serv._SMTPchannel
-        self.assertEqual(saslprep(chan.received_user),
-                         saslprep(_sim_auth_unicode_user))
-        self.assertEqual(saslprep(chan.received_password),
-                         saslprep(_sim_auth_unicode_pass))
+        self.assertTrue(sasl_plain_equal(chan.received_user, _sim_auth_unicode_user))
+        self.assertTrue(sasl_plain_equal(chan.received_password, _sim_auth_unicode_pass))
 
     def test_auth_cram_md5_unicode_raises(self):
         """CRAM-MD5: non-ASCII credentials raise UnicodeEncodeError; RFC 2195

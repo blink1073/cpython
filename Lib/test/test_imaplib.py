@@ -1133,7 +1133,7 @@ class TestModule(unittest.TestCase):
         self.assertEqual(cm.filename, __file__)
 
 
-from test.support.saslprep import saslprep
+from test.support.saslprep import sasl_plain_equal
 
 
 class UTF8IMAPHandler(SimpleIMAPHandler):
@@ -1224,8 +1224,8 @@ class TestLoginUnicode(NewIMAPTestsMixin, unittest.TestCase):
         client.state = 'NONAUTH'
         ret, _ = client.login(unicode_user, unicode_pass)
         self.assertEqual(ret, 'OK')
-        self.assertEqual(saslprep(server.received_user), saslprep(unicode_user))
-        self.assertEqual(saslprep(server.received_password), saslprep(unicode_pass))
+        self.assertTrue(sasl_plain_equal(server.received_user, unicode_user))
+        self.assertTrue(sasl_plain_equal(server.received_password, unicode_pass))
 
     def test_login_unicode_without_enable_raises(self):
         """LOGIN: non-ASCII credentials raise UnicodeEncodeError when

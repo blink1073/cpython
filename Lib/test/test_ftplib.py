@@ -1154,7 +1154,7 @@ class MiscTestCase(TestCase):
         support.check__all__(self, ftplib, not_exported=not_exported)
 
 
-from test.support.saslprep import saslprep
+from test.support.saslprep import sasl_plain_equal
 
 
 class FTPUnicodeHandler(DummyFTPHandler):
@@ -1200,8 +1200,8 @@ class TestFTPUnicode(TestCase):
         unicode_pass = 'pass\xb4'
         self.client.login(unicode_user, unicode_pass)
         handler = self.server.handler_instance
-        self.assertEqual(saslprep(handler.received_user), saslprep(unicode_user))
-        self.assertEqual(saslprep(handler.received_password), saslprep(unicode_pass))
+        self.assertTrue(sasl_plain_equal(handler.received_user, unicode_user))
+        self.assertTrue(sasl_plain_equal(handler.received_password, unicode_pass))
 
 
 def setUpModule():

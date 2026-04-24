@@ -92,3 +92,16 @@ def saslprep(data, prohibit_unassigned_code_points=True):
             raise ValueError("SASLprep: failed prohibited character check")
 
     return data
+
+
+def sasl_plain_equal(received, stored):
+    """Return True if SASL PLAIN credentials match after SASLprep normalisation.
+
+    Per RFC 4616 §2, credentials received from a client are query strings
+    (unassigned code points allowed), while credentials stored by the server
+    are stored strings (unassigned code points prohibited).
+    """
+    return (
+        saslprep(received, prohibit_unassigned_code_points=False)
+        == saslprep(stored)
+    )
